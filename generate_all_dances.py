@@ -1,28 +1,32 @@
-"""Script to generate all dances for a song as follows.
-
-1. 9 model dances ==> [num_steps=25,50,100] x ([ance_matrix_type='state','action','stateplusaction']
-2. 12 baselines ==> [num_steps=25,50,100] x [(unsyc,random), (unsyc, l2r), (sync,l2r), (sync,random)]
-TOTAL: 21 dances per song
-"""
+"""Script to generate all dances for a song."""
+from visualize import save_matrices, save_dance
 from multiprocessing import Pool
 from PIL import Image
 import numpy as np
 import itertools
 import argparse
 import librosa
-import pickle
 import madmom
 import random
 import torch
 import scipy
-import os
 
 random.seed(123)
 
 # parse arguments
 parser = argparse.ArgumentParser(description='Process arguments.')
-parser.add_argument('-songpath', '--songpath', type=str, help='path to .mp3 song -- e.g., ./audio_files/fluetesong.mp3')
-parser.add_argument('-songname', '--songname', type=str, help='name of song -- e.g., flutesong')
+parser.add_argument('-songpath', '--songpath', type=str, default='./audio_files/fluetesong.mp3',
+                    help='Path to .mp3 song')
+parser.add_argument('-songname', '--songname', type=str, default='flutesong',
+                    help='Name of song')
+parser.add_argument('-steps', '--steps', type=int, default=100,
+                    help='Number of equidistant LRS steps the agent should take')
+parser.add_argument('-type', '--type', type=str, default='action',
+                    help='Type of dance -- state, action, stateplusaction')
+parser.add_argument('-baseline', '--baseline', type=str, default='none',
+                    help='Generate baseline -- none, unsync_random, unsync_sequential, sync_sequential, sync_random')
+parser.add_argument('-visfolder', '--visfolder', type=str, default='./vis_num_steps_20/dancing_person_20',
+                    help='path to folder containing agent visualizations')
 args = parser.parse_args()
 
 # global variables
@@ -30,7 +34,7 @@ GRID_SIZE = 20
 REWARD_INTERVAL = 5
 ALL_ACTION_COMBS = list(set(itertools.permutations([-1 for _ in range(REWARD_INTERVAL)] + [1 for _ in range(REWARD_INTERVAL)] + [0 for _ in range(REWARD_INTERVAL)], REWARD_INTERVAL)))
 START_POSITION = int(GRID_SIZE / 2)
-ACTION_MAPPING = {-1: 0, 1: 1, 0: 2}
+ACTION_MAPPING = {-1: 'L', 1: 'R', 0: 'S'}    # L: left, R: right, S; stay
 MUSIC_MODE = 'affinity'
 MUSIC_METRIC = 'euclidean'
 HOP_LENGTH = 512
@@ -39,7 +43,7 @@ HOP_LENGTH = 512
 # BASELINES
 
 
-def baseline1(num_steps):
+def unsync_random(num_steps):
     """Baseline 1 : unsynced - random."""
     states, actions = [], []
     curr = START_POSITION
@@ -59,7 +63,7 @@ def baseline1(num_steps):
     return [states, actions]
 
 
-def baseline2(num_steps):
+def unsync_sequential(num_steps):
     """Baseline 2 : unsynced - left2right."""
     states, actions = [], []
     curr = START_POSITION
@@ -83,12 +87,12 @@ def baseline2(num_steps):
     return [states, actions]
 
 
-def baseline3(num_steps, filename, y, sr):
+def sync_sequential(num_steps, filename, duration):
     """Baseline 3 : synced - left2right."""
     # get beat information
     proc = madmom.features.beats.DBNBeatTrackingProcessor(fps=100)
     act = madmom.features.beats.RNNBeatProcessor()(filename)
-    beat_times = np.around(proc(act) * num_steps / librosa.get_duration(y=y, sr=sr))
+    beat_times = np.around(proc(act) * num_steps / duration)
 
     states, actions = [], []
     curr = START_POSITION
@@ -114,12 +118,12 @@ def baseline3(num_steps, filename, y, sr):
     return [states, actions]
 
 
-def baseline4(num_steps, filename, y, sr):
+def sync_random(num_steps, filename, duration):
     """Baseline 4 : synced - random."""
     # get beat information
     proc = madmom.features.beats.DBNBeatTrackingProcessor(fps=100)
     act = madmom.features.beats.RNNBeatProcessor()(filename)
-    beat_times = np.around(proc(act) * num_steps / librosa.get_duration(y=y, sr=sr))
+    beat_times = np.around(proc(act) * num_steps / duration)
 
     states, actions = [], []
     curr = START_POSITION
@@ -285,107 +289,90 @@ def getbest(loc, num_actions, prev_states, prev_actions, music_matrix_full, num_
 
 if __name__ == "__main__":
 
-    # load song
+    # get args
     songname = args.songname
-    filename = args.songpath
-    y, sr = librosa.load(filename)    # default sampling rate 22050
+    baseline = args.baseline
+    dance_matrix_type = args.type
+    num_steps = args.steps
+    visfolder = args.visfolder
+    songpath = args.songpath
 
-    # baselines for song
-    baseline_25 = [baseline1(num_steps=25), baseline2(num_steps=25), baseline3(num_steps=25, filename=filename, y=y, sr=sr), baseline4(num_steps=25, filename=filename, y=y, sr=sr)]
-    baseline_50 = [baseline1(num_steps=50), baseline2(num_steps=50), baseline3(num_steps=50, filename=filename, y=y, sr=sr), baseline4(num_steps=50, filename=filename, y=y, sr=sr)]
-    baseline_100 = [baseline1(num_steps=100), baseline2(num_steps=100), baseline3(num_steps=100, filename=filename, y=y, sr=sr), baseline4(num_steps=100, filename=filename, y=y, sr=sr)]
-    all_baselines = [baseline_25, baseline_50, baseline_100]
-
-    # data to be saved per song
-    correlations = []
-    dance_matrices = []
-    state_sequences = []
-    action_sequences = []
-    nums_steps = []
+    # load song
+    y, sr = librosa.load(songpath)    # default sampling rate 22050
+    duration = librosa.get_duration(y=y, sr=sr)
 
     # get music matrix
     music_matrix_full = compute_music_matrix(y, sr, MUSIC_MODE, MUSIC_METRIC)
 
-    # get 9 model dances
-    for idx, num_steps in enumerate([25, 50, 100]):
+    # main code
+    if baseline in ['unsync_random', 'unsync_sequential', 'sync_sequential', 'sync_random']:
+        # check baselines
+        if baseline == 'unsync_random':
+            states, actions = unsync_random(num_steps=num_steps)
+        if baseline == 'unsync_sequential':
+            states, actions = unsync_sequential(num_steps=num_steps)
+        if baseline == 'sync_sequential':
+            states, actions = sync_sequential(num_steps=num_steps, filename=songpath, duration=duration)
+        else:
+            states, actions = sync_random(num_steps=num_steps, filename=songpath, duration=duration)
 
-        currbaselines = all_baselines[idx]
+        # compute dance matrix
+        dance_matrix = get_dance_matrix(states, actions, dance_matrix_type, music_matrix_full)
 
-        for dance_matrix_type in ['state', 'action', 'stateplusaction']:
+        # compute correlation
+        reward = music_reward(music_matrix_full, dance_matrix, 'pearson')
+    else:
+        # our approach
+        # try out all combinations of `REWARD_INTERVAL` actions and compute reward
+        prev_states = []
+        prev_actions = []
 
-            # try out all combinations of `REWARD_INTERVAL` actions and compute reward
-            prev_states = []
-            prev_actions = []
+        for i in range(num_steps):
+            # apply greedy algo to get dance matrix with best reward
+            if len(prev_actions) == 0:
+                prev_states, prev_actions, reward = getbest(loc=START_POSITION,
+                                                            num_actions=REWARD_INTERVAL,
+                                                            prev_states=prev_states,
+                                                            prev_actions=prev_actions,
+                                                            music_matrix_full=music_matrix_full,
+                                                            num_steps=num_steps,
+                                                            dance_matrix_type=dance_matrix_type)
+            elif not i % REWARD_INTERVAL:
+                prev_states, prev_actions, reward = getbest(loc=prev_states[-1],
+                                                            num_actions=REWARD_INTERVAL,
+                                                            prev_states=prev_states,
+                                                            prev_actions=prev_actions,
+                                                            music_matrix_full=music_matrix_full,
+                                                            num_steps=num_steps,
+                                                            dance_matrix_type=dance_matrix_type)
+            elif num_steps - len(prev_actions) != 0 and num_steps - len(prev_actions) < REWARD_INTERVAL:
+                prev_states, prev_actions, reward = getbest(loc=prev_states[-1],
+                                                            num_actions=num_steps-len(prev_states),
+                                                            prev_states=prev_states,
+                                                            prev_actions=prev_actions,
+                                                            music_matrix_full=music_matrix_full,
+                                                            num_steps=num_steps,
+                                                            dance_matrix_type=dance_matrix_type)
+            else:
+                continue
 
-            for i in range(num_steps):
-                # apply greedy algo to get dance matrix with best reward
-                if len(prev_actions) == 0:
-                    prev_states, prev_actions, reward = getbest(loc=START_POSITION,
-                                                                num_actions=REWARD_INTERVAL,
-                                                                prev_states=prev_states,
-                                                                prev_actions=prev_actions,
-                                                                music_matrix_full=music_matrix_full,
-                                                                num_steps=num_steps,
-                                                                dance_matrix_type=dance_matrix_type)
-                elif not i % REWARD_INTERVAL:
-                    prev_states, prev_actions, reward = getbest(loc=prev_states[-1],
-                                                                num_actions=REWARD_INTERVAL,
-                                                                prev_states=prev_states,
-                                                                prev_actions=prev_actions,
-                                                                music_matrix_full=music_matrix_full,
-                                                                num_steps=num_steps,
-                                                                dance_matrix_type=dance_matrix_type)
-                elif num_steps - len(prev_actions) != 0 and num_steps - len(prev_actions) < REWARD_INTERVAL:
-                    prev_states, prev_actions, reward = getbest(loc=prev_states[-1],
-                                                                num_actions=num_steps-len(prev_states),
-                                                                prev_states=prev_states,
-                                                                prev_actions=prev_actions,
-                                                                music_matrix_full=music_matrix_full,
-                                                                num_steps=num_steps,
-                                                                dance_matrix_type=dance_matrix_type)
-                else:
-                    continue
+        # get best dance matrix
+        dance_matrix = get_dance_matrix(prev_states, prev_actions, dance_matrix_type, music_matrix_full)
 
-            # get best dance matrix
-            dance_matrix = get_dance_matrix(prev_states, prev_actions, dance_matrix_type, music_matrix_full)
+        # assign states and actions correctly correctly
+        states = prev_states
+        actions = prev_actions
 
-            # map actions correctly
-            actions = [ACTION_MAPPING[a] for a in prev_actions]
+    # map actions correctly
+    actions = [ACTION_MAPPING[a] for a in actions]
 
-            # append relevant details
-            correlations.append(reward)
-            dance_matrices.append(dance_matrix)
-            state_sequences.append(prev_states)
-            action_sequences.append(actions)
-            nums_steps.append(num_steps)
+    # print results
+    print("Correlation = ", reward)
+    print("State sequence = ", states)
+    print("Action sequence = ", actions)
 
-        # get 4 baselines for `num_steps`
-        for baseline in currbaselines:
-            bstates, bactions = baseline
-
-            # compute dance matrix
-            bdance_matrix = get_dance_matrix(bstates, bactions, dance_matrix_type, music_matrix_full)
-
-            # compute correlation
-            bcorr = music_reward(music_matrix_full, bdance_matrix, 'pearson')
-
-            # append relevant details
-            correlations.append(bcorr)
-            dance_matrices.append(bdance_matrix)
-            state_sequences.append(bstates)
-            action_sequences.append(bactions)
-            nums_steps.append(num_steps)
-
-    # store details in file
-    songdict = {'music_matrix': music_matrix_full,
-                'correlations': correlations,
-                'dance_matrices': dance_matrices,
-                'state_sequences': state_sequences,
-                'action_sequences': action_sequences,
-                'nums_steps': nums_steps}
-    if not os.path.exists('./pickles'):
-        os.makedirs('./pickles')
-    with open('pickles/' + songname + '.pickle', 'wb') as handle:
-        pickle.dump(songdict, handle, protocol=pickle.HIGHEST_PROTOCOL)
+    # visualize results
+    save_matrices(music_matrix=music_matrix_full, dance_matrix=dance_matrix, duration=duration)
+    save_dance(states=states, visfolder=args.visfolder, songname=songname, duration=duration, num_steps=num_steps)
 
     print(songname, " :: DONE!")
