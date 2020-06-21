@@ -15,13 +15,13 @@ import os
 
 # parse arguments
 parser = argparse.ArgumentParser(description='Process arguments.')
-parser.add_argument('-songpath', '--songpath', type=str,
+parser.add_argument('-songpath', '--songpath', type=str, default='./audio_files/fluetesong.mp3',
                     help='path to .mp3 song -- e.g., ./audio_files/fluetesong.mp3')
-parser.add_argument('-songname', '--songname', type=str,
+parser.add_argument('-songname', '--songname', type=str, default='flutesong',
                     help='name of song -- e.g., flutesong')
-parser.add_argument('-visfolder', '--visfolder', type=str,
-                    help='path to folder containing agent visualizations -- e.g., vis_num_steps_20/dancing_person_20')
-parser.add_argument('-num', '--num', type=int,
+parser.add_argument('-visfolder', '--visfolder', type=str, default='./vis_num_steps_20/dancing_person_20',
+                    help='path to folder containing agent visualizations -- e.g., ./vis_num_steps_20/dancing_person_20')
+parser.add_argument('-num', '--num', type=int, default=15,
                     help='integer from 0 to 20 indicating which visualization you want to see -- e.g., 15 indicates action-based dance with 100 steps. Check visualize.py for more details.')
 args = parser.parse_args()
 
@@ -48,10 +48,10 @@ if __name__ == "__main__":
     # -----------------------------------------------------------------------------------------
     # 14    |   15   |       16        |     17    |     18    |     19    |     20    |   100
     # -----------------------------------------------------------------------------------------
-    num = 15    # (action, 100 steps)
 
     songname = args.songname
     filename = args.songpath
+    num = args.num
     mp4_filename = "dance_" + songname + "_" + str(num)
     with open('pickles/' + songname + '.pickle', 'rb') as handle:
         songdict = pickle.load(handle)
