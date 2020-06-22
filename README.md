@@ -3,14 +3,18 @@ This is the official repository accompanying the paper "Feel The Music: Automati
 
 Full text available at: https://purvaten.github.io/data/dancing_agents_paper.pdf
 
+## Requirements
+Create a new Python 3.7 virtual environment. Install the requirements using -
+```pip install -r requirements.txt```
+
 ## Steps for Generating Dances
 0. ```git clone https://github.com/purvaten/feel-the-music.git```
 
 1. ```cd feel-the-music```
 
-2. Generate dances (baselines + model) for 25, 50, 100 steps (example below)
+2. Generate dance (example below)
 ```
-python generate_all_dances.py \
+python generate_dance.py \
 --songpath './audio_files/flutesong.mp3' \
 --songname 'flutesong' \
 --steps 100 \

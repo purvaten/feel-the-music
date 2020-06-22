@@ -8,7 +8,6 @@ import argparse
 import librosa
 import madmom
 import random
-import torch
 import scipy
 
 random.seed(123)
@@ -199,9 +198,8 @@ def compute_music_matrix(y, sr, mode, metric):
     lifter = 0
     n_mfcc = 20
     mfcc = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=n_mfcc, lifter=lifter, hop_length=HOP_LENGTH)
-    R = torch.from_numpy(librosa.segment.recurrence_matrix(mfcc, metric=metric, mode=mode, sym=True).T)    # already normalized in 0-1
-    R = R + torch.zeros(R.shape)    # change (True, False) to (1, 0)
-    R.fill_diagonal_(1)    # make diagonal entries 1
+    R = librosa.segment.recurrence_matrix(mfcc, metric=metric, mode=mode, sym=True).T.astype(float)    # already normalized in 0-1
+    np.fill_diagonal(R, 1)    # make diagonal entries 1
     return R
 
 # **************************************************************************************************************** #
@@ -269,7 +267,7 @@ def getbest(loc, num_actions, prev_states, prev_actions, music_matrix_full, num_
     Start from `loc` in grid of size `GRID_SIZE`.
     """
     scale = int(music_matrix_full.shape[0] * (len(prev_states)+num_actions) / num_steps)
-    music_matrix = np.array([music_matrix_full.numpy()[i][:scale] for i in range(scale)])
+    music_matrix = np.array([music_matrix_full[i][:scale] for i in range(scale)])
     # get best dance for this music matrix
     bestreward = 0
     p = Pool()
