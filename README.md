@@ -1,10 +1,10 @@
 # Feel The Music: Automatically Generating A Dance For An Input Song
 This is the official repository accompanying the paper "Feel The Music: Automatically Generating A Dance For An Input Song", by Purva Tendulkar, Abhishek Das, Aniruddha Kembhavi & Devi Parikh.
 
-Full text available at: https://purvaten.github.io/data/dancing_agents_paper.pdf
+Full text available at: https://arxiv.org/abs/2006.11905
 
 ## Requirements
-Create a new Python 3.7 virtual environment. Install the requirements using -
+Create a new Python 3.7 virtual environment. Install the requirements using
 ```pip install -r requirements.txt```
 
 ## Steps for Generating Dances
